@@ -1,8 +1,5 @@
 # Comparação: RIP vs OSPF vs Algoritmo Próprio
 
-> As seções 3 a 6 devem ser preenchidas com os números de
-> `graficos/resumo.csv` e com os gráficos gerados em `graficos/`.
-
 ## Metodologia
 
 As três soluções rodam sobre a mesma topologia, **uma por vez**, e são
@@ -40,28 +37,31 @@ deve aparecer no tempo sem conectividade e precisa ser discutida.
 - **OSPF**: menor custo acumulado (custo = referência / banda da interface). Nesta topologia todos os enlaces têm o mesmo custo, então o resultado equivale a saltos. Suporta ECMP.
 - **Algoritmo próprio**: menor custo acumulado, com custo de enlace configurável (default 1 = saltos). Anúncio do next-hop atual é sempre aceito, mesmo que piore. Anúncio de outro vizinho só é aceito se for estritamente melhor. Em empate, mantém a rota atual (evita oscilação). Redes locais nunca são substituídas.
 
-## 3. Comportamento em mudança de topologia
-Medido: RIP **[__] s**, OSPF **[__] s**, próprio **[__] s** sem conectividade (`graficos/delay.png`).
+## Resultados medidos
 
-Comportamento esperado, para comparar com o medido:
-- **OSPF**: a queda da interface gera novo LSA imediatamente e todos recalculam o SPF, então a perda deve ser de poucos segundos ou nenhuma.
-- **RIP**: R1 perde a rota direta na hora e passa a usar o anúncio de 3 saltos já recebido de R2/R3. O triggered update do FRR propaga a mudança, então a perda também deve ser curta. Split horizon evita a contagem ao infinito nessa malha.
-- **Próprio**: R1 remove a rota do kernel na queda da interface, mas a tabela do algoritmo só invalida a rota após o timeout (até 18 s). Durante esse tempo, os pacotes para LAN5 são descartados. É a maior perda esperada, e é consequência direta da decisão de não ter hello nem detecção por interface.
+| Solução | Tabela (rotas) | Pacotes/s | kbit/s | RTT médio | Sem conectividade na falha |
+|---|---|---|---|---|---|
+| RIP | 15,73 | 4,06 | 8,70 | 0,17 ms | 2 s |
+| OSPF | 21,30 | 3,92 | 2,77 | 0,16 ms | 0 s |
+| Algoritmo próprio | 15,66 | 2,79 | 6,76 | 0,13 ms | 21 s |
+
+Valores somados sobre os 5 roteadores (pacotes e banda) ou médios por roteador (tabela), em 120 s de coleta, com queda de R1-R5 aos 40 s por 30 s. Gráficos em `graficos/`.
+
+## 3. Comportamento em mudança de topologia
+- **OSPF (0 s)**: a queda da interface gera um novo LSA na hora e todos recalculam o SPF. O desvio para R1 → R3 → R4 → R5 ocorreu sem perda de pings. Porém, **na subida da rede** o OSPF foi o mais lento: foram necessários de 60 a 90 s até os vizinhos chegarem a *Full*, porque, nas redes broadcast do Docker, a eleição de DR/BDR espera o *dead interval* (40 s).
+- **RIP (2 s)**: R1 perde a rota direta com a interface, mas o ripd do FRR só guarda a melhor rota. Por isso ele precisa esperar o próximo anúncio de R2/R3 (a cada 5 s) para aprender o caminho alternativo.
+- **Algoritmo próprio (21 s)**: o kernel remove a rota junto com a interface, mas o algoritmo só invalida a rota por timeout (18 s sem anúncio de R5) e depois aceita o anúncio alternativo. Isso confirma o custo da decisão de projeto de não ter hello nem detecção por interface. A reconvergência em si funcionou (LAN5 via R3 com métrica 3).
 
 ## 4. Consumo de recursos de controle
-Medido: RIP **[__] pkt/s / [__] kbit/s**, OSPF **[__] / [__]**, próprio **[__] / [__]**.
-
-Esperado: em regime, o OSPF envia só hellos a cada 10 s, com LSAs apenas em mudanças ou no refresh de 30 min, então deve ter o menor custo. RIP e o algoritmo próprio enviam a tabela inteira a cada 5 s para cada vizinho. O próprio tende a usar mais bytes, porque o formato é texto e inclui rotas caídas e envenenadas. Todos os três mostram picos na falha, com LSAs e triggered updates.
+- **OSPF, 2,77 kbit/s**: tem a menor banda, porque em regime só envia hellos pequenos a cada 10 s; LSAs só aparecem na falha. Em pacotes (3,92/s) fica próximo do RIP, porque envia hellos também nas LANs.
+- **RIP, 8,70 kbit/s**: tem a maior banda, porque envia a tabela inteira a cada 5 s em todas as interfaces, inclusive nas LANs.
+- **Algoritmo próprio, 2,79 pacotes/s e 6,76 kbit/s**: envia o menor número de pacotes, porque manda o vetor só para os vizinhos (unicast), nunca nas LANs. Os pacotes são grandes, porque o formato é texto.
 
 ## 5. Tamanho da tabela de roteamento
-Medido: média de **[__]** rotas por roteador.
-
-Esperado: as três soluções aprendem os mesmos 17 prefixos (5 LANs, 7 enlaces e 5 loopbacks). Diferenças pequenas vêm de detalhes, como o ECMP do OSPF, e da queda temporária de rotas durante a falha.
+RIP (15,7) e o algoritmo próprio (15,7) têm o esperado: 16 rotas por roteador na tabela principal do kernel, com uma pequena queda durante a falha. O OSPF aparece com 21,3 porque instala **ECMP** (caminhos múltiplos de mesmo custo). Por exemplo, R1 alcança a LAN4 por R2 e por R3 ao mesmo tempo, e cada próximo salto conta como uma linha. Portanto, o número maior reflete redundância, não mais destinos.
 
 ## 6. Delay
-Medido: RTT médio **[__] ms** (RIP), **[__] ms** (OSPF), **[__] ms** (próprio).
-
-O protocolo não altera o encaminhamento em si, que é sempre feito pelo kernel. Ele só decide o caminho. Portanto, o RTT deve ser equivalente nos três casos, subindo levemente enquanto R1-R5 está fora (3 saltos em vez de 1). Em containers, as diferenças ficam na casa de décimos de ms.
+O RTT médio ficou entre 0,13 e 0,17 ms nas três soluções. O protocolo só decide o caminho; o encaminhamento é feito sempre pelo kernel. Durante a falha o caminho passa de 2 para 4 saltos, mas, em containers na mesma máquina, a diferença fica na casa de microssegundos.
 
 ## 7. Escalabilidade e complexidade
 - **RIP**: configuração mínima, mas limite de 15 saltos, convergência lenta e envio da tabela inteira a cada update. Adequado a redes pequenas.

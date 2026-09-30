@@ -25,7 +25,7 @@ iface() { docker exec "$1" ip -o -4 addr show | awk -v p="$NET" 'index($4,p)==1 
 IA=$(iface "$A"); IB=$(iface "$B")
 [ -z "$IA" ] || [ -z "$IB" ] && { echo "interface do enlace $NET nao encontrada"; exit 1; }
 
-log() { echo "[$(date +%T)] $2 enlace $A-$B ($A:$IA, $B:$IB)"; [ -n "$EVENTS" ] && echo "$1,$2,$A-$B" >> "$EVENTS"; }
+log() { echo "[$(date +%T)] $2 enlace $A-$B ($A:$IA, $B:$IB)"; [ -n "$EVENTS" ] && echo "$1,$2,$A-$B" >> "$EVENTS"; true; }
 
 docker exec "$A" ip link set "$IA" down; docker exec "$B" ip link set "$IB" down
 log "$(date +%s)" down

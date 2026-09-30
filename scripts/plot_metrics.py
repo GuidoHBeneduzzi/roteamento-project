@@ -114,9 +114,17 @@ def load(results, proto):
     # tempo sem conectividade: pings perdidos a partir da falha x intervalo medio
     outage = None
     if down is not None and len(rtt_t) > 1:
-        period = (rtt_t[-1] - rtt_t[0]) / (len(rtt_t) - 1)
-        lost = sum(1 for t, v in zip(rtt_t, rtt_v) if t >= down and math.isnan(v))
-        outage = lost * period
+        outage, start = 0.0, None
+        for t, v in zip(rtt_t, rtt_v):
+            if t < down:
+                continue
+            if math.isnan(v) and start is None:
+                start = t
+            elif not math.isnan(v) and start is not None:
+                outage += t - start
+                start = None
+        if start is not None:
+            outage += rtt_t[-1] - start
 
     valid = [v for v in rtt_v if not math.isnan(v)]
     return {

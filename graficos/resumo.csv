@@ -1,0 +1,4 @@
+solucao,tabela_media,pacotes_s,kbit_s,rtt_medio_ms,sem_conectividade_s
+RIP,15.73,4.06,8.70,0.17,2.00
+OSPF,21.30,3.92,2.77,0.16,0.00
+Algoritmo proprio,15.66,2.79,6.76,0.13,21.00
