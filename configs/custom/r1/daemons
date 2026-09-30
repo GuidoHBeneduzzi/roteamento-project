@@ -1,0 +1,7 @@
+zebra=yes
+ripd=no
+ospfd=no
+vtysh_enable=yes
+zebra_options="  -A 127.0.0.1 -s 90000000"
+ripd_options="   -A 127.0.0.1"
+ospfd_options="  -A 127.0.0.1"

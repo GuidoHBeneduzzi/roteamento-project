@@ -1,0 +1,128 @@
+# Topologia: 5 roteadores em anel (R1-R2-R3-R4-R5-R1) + 2 diagonais
+# (R1-R3, R2-R4), cada um com uma LAN de acesso.
+#
+# Uso (apenas UM cenario por vez, conforme o enunciado):
+#   PROTO=rip    docker compose up -d     # FRR com ripd
+#   PROTO=ospf   docker compose up -d     # FRR com ospfd
+#   PROTO=custom docker compose up -d     # sem protocolo; depois ./scripts/run_custom.sh start
+#   docker compose down
+#
+# Enderecamento: enlaces em /29 e LANs em /24. O Docker reserva um IP de
+# cada rede para o gateway da bridge (host); por isso ele e fixado no
+# ULTIMO endereco util (.6 nos enlaces, .254 nas LANs), deixando .1/.2
+# livres para os roteadores. A rota default que o Docker cria nos
+# roteadores e removida na subida, para que todo o trafego passe pela
+# malha e nunca pelo host.
+
+x-router: &router
+  image: quay.io/frrouting/frr:9.1.0
+  privileged: true
+  cap_add: [NET_ADMIN, SYS_ADMIN]
+  sysctls:
+    net.ipv4.ip_forward: 1
+    net.ipv4.conf.all.rp_filter: 0
+    net.ipv4.conf.default.rp_filter: 0
+  command: ["sh", "-c", "ip route del default 2>/dev/null; exec /usr/lib/frr/docker-start"]
+
+x-client: &client
+  image: alpine:3.20
+  cap_add: [NET_ADMIN]
+
+services:
+  r1:
+    <<: *router
+    container_name: r1
+    hostname: r1
+    volumes:
+      - ./configs/${PROTO:-rip}/r1:/etc/frr
+      - ./custom-algorithm:/opt/custom
+    networks:
+      lan1: { ipv4_address: 192.168.1.1 }
+      link_r1_r2: { ipv4_address: 10.0.12.1 }
+      link_r5_r1: { ipv4_address: 10.0.51.2 }
+      link_r1_r3: { ipv4_address: 10.0.13.1 }
+
+  r2:
+    <<: *router
+    container_name: r2
+    hostname: r2
+    volumes:
+      - ./configs/${PROTO:-rip}/r2:/etc/frr
+      - ./custom-algorithm:/opt/custom
+    networks:
+      lan2: { ipv4_address: 192.168.2.1 }
+      link_r1_r2: { ipv4_address: 10.0.12.2 }
+      link_r2_r3: { ipv4_address: 10.0.23.1 }
+      link_r2_r4: { ipv4_address: 10.0.24.1 }
+
+  r3:
+    <<: *router
+    container_name: r3
+    hostname: r3
+    volumes:
+      - ./configs/${PROTO:-rip}/r3:/etc/frr
+      - ./custom-algorithm:/opt/custom
+    networks:
+      lan3: { ipv4_address: 192.168.3.1 }
+      link_r2_r3: { ipv4_address: 10.0.23.2 }
+      link_r3_r4: { ipv4_address: 10.0.34.1 }
+      link_r1_r3: { ipv4_address: 10.0.13.2 }
+
+  r4:
+    <<: *router
+    container_name: r4
+    hostname: r4
+    volumes:
+      - ./configs/${PROTO:-rip}/r4:/etc/frr
+      - ./custom-algorithm:/opt/custom
+    networks:
+      lan4: { ipv4_address: 192.168.4.1 }
+      link_r3_r4: { ipv4_address: 10.0.34.2 }
+      link_r4_r5: { ipv4_address: 10.0.45.1 }
+      link_r2_r4: { ipv4_address: 10.0.24.2 }
+
+  r5:
+    <<: *router
+    container_name: r5
+    hostname: r5
+    volumes:
+      - ./configs/${PROTO:-rip}/r5:/etc/frr
+      - ./custom-algorithm:/opt/custom
+    networks:
+      lan5: { ipv4_address: 192.168.5.1 }
+      link_r4_r5: { ipv4_address: 10.0.45.2 }
+      link_r5_r1: { ipv4_address: 10.0.51.1 }
+
+  client1:
+    <<: *client
+    container_name: client1
+    hostname: client1
+    # default route pelo roteador da LAN (e nao pelo gateway do Docker)
+    command: sh -c "ip route replace default via 192.168.1.1 && sleep infinity"
+    depends_on: [r1]
+    networks:
+      lan1: { ipv4_address: 192.168.1.10 }
+
+  client5:
+    <<: *client
+    container_name: client5
+    hostname: client5
+    # default route pelo roteador da LAN (e nao pelo gateway do Docker)
+    command: sh -c "ip route replace default via 192.168.5.1 && sleep infinity"
+    depends_on: [r5]
+    networks:
+      lan5: { ipv4_address: 192.168.5.10 }
+
+networks:
+  lan1: { driver: bridge, ipam: { config: [{ subnet: 192.168.1.0/24, gateway: 192.168.1.254 }] } }
+  lan2: { driver: bridge, ipam: { config: [{ subnet: 192.168.2.0/24, gateway: 192.168.2.254 }] } }
+  lan3: { driver: bridge, ipam: { config: [{ subnet: 192.168.3.0/24, gateway: 192.168.3.254 }] } }
+  lan4: { driver: bridge, ipam: { config: [{ subnet: 192.168.4.0/24, gateway: 192.168.4.254 }] } }
+  lan5: { driver: bridge, ipam: { config: [{ subnet: 192.168.5.0/24, gateway: 192.168.5.254 }] } }
+  link_r1_r2: { driver: bridge, ipam: { config: [{ subnet: 10.0.12.0/29, gateway: 10.0.12.6 }] } }
+  link_r2_r3: { driver: bridge, ipam: { config: [{ subnet: 10.0.23.0/29, gateway: 10.0.23.6 }] } }
+  link_r3_r4: { driver: bridge, ipam: { config: [{ subnet: 10.0.34.0/29, gateway: 10.0.34.6 }] } }
+  link_r4_r5: { driver: bridge, ipam: { config: [{ subnet: 10.0.45.0/29, gateway: 10.0.45.6 }] } }
+  link_r5_r1: { driver: bridge, ipam: { config: [{ subnet: 10.0.51.0/29, gateway: 10.0.51.6 }] } }
+  link_r1_r3: { driver: bridge, ipam: { config: [{ subnet: 10.0.13.0/29, gateway: 10.0.13.6 }] } }
+  link_r2_r4: { driver: bridge, ipam: { config: [{ subnet: 10.0.24.0/29, gateway: 10.0.24.6 }] } }
