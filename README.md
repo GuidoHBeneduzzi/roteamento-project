@@ -8,7 +8,7 @@ distâncias em C. As três soluções **nunca rodam ao mesmo tempo**.
 
 - Topologia física e lógica: [`topology/topology.md`](topology/topology.md)
 - Análise comparativa: [`docs/comparacao.md`](docs/comparacao.md)
-- Vídeo de demonstração: **(adicionar link)**
+- Vídeo de demonstração: **https://youtu.be/x8H9t9khZHo**
 
 ## Estrutura
 
